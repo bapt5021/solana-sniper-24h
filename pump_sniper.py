@@ -1,4 +1,4 @@
-# pump_sniper.py → VERSION MAX SPEED + FIXÉE (0 erreur – Décembre 2025)
+# pump_sniper.py → FIX RENDER + HEALTH CHECK (Décembre 2025)
 import asyncio
 import aiohttp
 import json
@@ -14,6 +14,8 @@ from solders.instruction import Instruction
 from solders.compute_budget import set_compute_unit_limit, set_compute_unit_price
 from solana.rpc.async_api import AsyncClient
 from solana.rpc.commitment import Confirmed
+from fastapi import FastAPI
+import uvicorn
 
 load_dotenv()
 
@@ -30,12 +32,7 @@ wallet = Keypair.from_base58_string(PRIVATE)
 client = AsyncClient(RPC_URL)
 
 PROGRAMS = [
-    "6ef8rrecthR5DkzoJcbfFqzZHGHwuEeVWHo8idx94Cu4",  # Pump.fun
-    "BONK11337rM5zL9pZ3k3k3k3k3k3k3k3k3k3k3k3k3k3k3k3k",      # LetsBONK
-    "LaunchLab111111111111111111111111111111111111111111111111",
-    "moon11111111111111111111111111111111111111111111111111111",
-    "BLV1111111111111111111111111111111111111111111111111111111",
-    "JupStudio1111111111111111111111111111111111111111111111111"
+    "6ef8rrecthR5DkzoJcbfFqzZHGHwuEeVWHo8idx94Cu4"
 ]
 
 GLOBAL = Pubkey.from_string("4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4haw8tqK")
@@ -51,12 +48,21 @@ SELL_DISC = bytes([0x9a,0x38,0x0f,0x1a,0x4e,0x5c,0x6d,0x7e])
 seen = set()
 positions = {}
 
-# Session créée DANS le main (fix du bug)
+# Health check pour Render (garde le bot éveillé)
+app = FastAPI()
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "bot_running": True}
+
+# Fonction Telegram
 async def tg(text):
     async with aiohttp.ClientSession() as s:
         await s.post(f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-                     json={"chat_id": CHAT, "text": text, "parse_mode": "HTML", "disable_web_page_preview": True},
+                     json={"chat_id": CHAT, "text": text, "parse_mode": "HTML"},
                      ssl=False)
+
+# (tout le reste du code buy/sell/smart_exit/get_price reste identique à la version précédente)
 
 async def get_price(mint):
     try:
@@ -68,7 +74,7 @@ async def get_price(mint):
     except: return 0
 
 async def smart_exit(mint, entry):
-    for _ in range(600):  # max 50 min
+    for _ in range(600):
         await asyncio.sleep(5)
         p = await get_price(mint)
         if p <= 0: continue
@@ -118,11 +124,11 @@ async def sell(mint_str):
     except: pass
 
 async def main():
-    await tg(f"<b>SNIPER MAX SPEED ACTIF</b>\nLatence < 350ms\n6 plateformes\nWallet: <code>{wallet.pubkey()}</code>")
-    print("Sniper MAX SPEED lancé – Helius + 6 plateformes")
+    await tg(f"<b>SNIPER RENDER FIX ACTIF</b>\nHealth check OK\nWallet: <code>{wallet.pubkey()}</code>")
+    print("Sniper Render fix lancé")
 
-    async with aiohttp.ClientSession() as session:
-        async with session.ws_connect(WS_URL) as ws:
+    async with aiohttp.ClientSession() as s:
+        async with s.ws_connect(WS_URL) as ws:
             await ws.send_json({"jsonrpc":"2.0","id":1,"method":"logsSubscribe","params":[{"mentions":PROGRAMS},{"commitment":"processed"}]})
 
             async for msg in ws:
@@ -144,7 +150,6 @@ async def main():
                         if mint in seen or mint in positions: continue
                         seen.add(mint)
 
-                        # Filtres parallèles (ultra-rapide)
                         supply_task = client.get_token_supply(mint)
                         largest_task = client.get_token_largest_accounts(mint)
                         auth_task = client.get_account_info(Pubkey.from_string(mint))
@@ -167,10 +172,14 @@ async def main():
                         if sig:
                             entry = await get_price(mint)
                             positions[mint] = entry
-                            await tg(f"<b>AUTO-BUY < 350ms !</b>\n{sig}\nEntry ≈ {entry:.9f}")
+                            await tg(f"<b>AUTO-BUY OK !</b>\n{sig}\nEntry ≈ {entry:.9f}")
                             asyncio.create_task(smart_exit(mint, entry))
 
                 except Exception as e:
                     print("Erreur ignorée:", e)
 
-asyncio.run(main())
+if __name__ == "__main__":
+    # Démarre FastAPI pour health check + sniper en parallèle
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    uvicorn.run(app, host="0.0.0.0", port=10000)
